@@ -23,6 +23,9 @@
 | Built from Github | guacamole:github <br> guacamole:github-pg13 | guacamole:github-pg14 | guacamole:github-pg15 | guacamole:github-pg16 | guacamole:github-pg17 |
 
 # What's new / Changelog
+**2026-05-11** - Updated to S6 Overlay 3.2.3.0. Fixed Github images based on Ubuntu Noble.
+If you see new amd64 or arm64 images on Docker hub, it's bcause I have changed the build process, but imagess manifest are merged, and you can still use the previous tags.
+
 **2026-05-06** - Updated to PostgreSQL JDBC 42.7.11.  Images Alpine with PostgreSQL 13 and 14 have been removed.  Added images with PostgreSQL 18.
 
 **2026-04-08** - Updated to Tomcat 9.0.117

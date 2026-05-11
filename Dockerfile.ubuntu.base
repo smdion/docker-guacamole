@@ -10,7 +10,7 @@ ENV GUACAMOLE_HOME=/app/guacamole \
   PGDATA=/config/postgres \
   POSTGRES_USER=guacamole \
   POSTGRES_DB=guacamole_db \
-  S6OVERLAY_VER=3.2.2.0 \
+  S6OVERLAY_VER=3.2.3.0 \
   POSTGREJDBC_VER=42.7.11 \
   GUAC_DOWN_PATH=https://dlcdn.apache.org/guacamole \
   GUAC_VER=1.5.5 \
@@ -49,7 +49,7 @@ RUN set -xe && apt-get update && apt-get upgrade -y && apt-get install -y --no-i
 && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg && \
     echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | tee  /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && apt-get upgrade -y -t jammy-backports && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
       freerdp2-dev \
       ghostscript \
       libavcodec-dev \
@@ -73,6 +73,7 @@ RUN set -xe && apt-get update && apt-get upgrade -y && apt-get install -y --no-i
       libwebp-dev \
       libwebsockets-dev \
       make \
+      autoconf automake \
       xmlstarlet \
 # Link FreeRDP to where guac expects it to be
 && ( ln -s /usr/local/lib/freerdp /usr/lib/arm-linux-gnueabihf/freerdp ||  \
