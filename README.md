@@ -23,6 +23,8 @@
 | Built from Github | guacamole:github <br> guacamole:github-pg13 | guacamole:github-pg14 | guacamole:github-pg15 | guacamole:github-pg16 | guacamole:github-pg17 |
 
 # What's new / Changelog
+**2026-05-12** - Updated to Tomcat 9.0.118
+
 **2026-05-11** - Updated to S6 Overlay 3.2.3.0. Fixed Github images based on Ubuntu Noble.
 If you see new amd64 or arm64 images on Docker hub, it's bcause I have changed the build process, but imagess manifest are merged, and you can still use the previous tags.
 
