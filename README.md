@@ -36,6 +36,9 @@ If you see new amd64 or arm64 images on Docker hub, it's bcause I have changed t
 
 **2026-01-26** - Updated to Tomcat 9.0.115 and S6 3.2.2.0
 
+<details>
+<summary>Older changelog entries</summary>
+
 **2026-01-09** - Happy new Year! Images had been updated to Tomcat 9.0.113 a while back, but I forgot to update this README...
 Github images have not been updated in a while, as there is a build error. That's a shame, as Guacamole's repo has been updated to 1.6.1. I'll keep trying and keep you posted!
 
@@ -80,9 +83,6 @@ Github images have not been updated in a while, as there is a build error. That'
 **2025-03-06** - Updated to Tomcat 9.0.100
 
 **2025-02-11** - Updated to Tomcat 9.0.99
-
-<details>
-<summary>Older changelog entries</summary>
 
 **2025-02-07** - Re-tagged the alpine based images, shorter names.
 
