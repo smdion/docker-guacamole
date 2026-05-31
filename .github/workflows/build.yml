@@ -26,7 +26,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Load build inputs from PR_SHAS.env
-        run: cat custom/PR_SHAS.env >> "$GITHUB_ENV"
+        # Only KEY=value lines — skip comments/blanks ($GITHUB_ENV rejects them).
+        run: grep -E '^[A-Z_]+=' custom/PR_SHAS.env >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
