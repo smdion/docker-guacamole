@@ -1,0 +1,55 @@
+name: upstream-sync
+
+# Keep the fork mergeable with abesnier/docker-guacamole. Weekly (and on demand)
+# attempt to merge upstream into a sync/upstream branch and open a PR. A merge
+# CONFLICT fails the job loudly instead of silently rotting — build.yml then
+# rebuilds + smoke-tests the merged result before anything can be published.
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream/master
+        id: merge
+        run: |
+          git remote add upstream https://github.com/abesnier/docker-guacamole.git
+          git fetch upstream
+          git checkout -B sync/upstream origin/main
+          if git merge --no-edit upstream/master; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Merge conflict with upstream/master — resolve manually."
+            git merge --abort || true
+            exit 1
+          fi
+
+      - name: Push sync branch
+        run: git push --force-with-lease origin sync/upstream
+
+      - name: Open / update PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: sync/upstream
+          base: main
+          title: "chore: sync with abesnier/docker-guacamole"
+          body: |
+            Automated merge of `upstream/master`.
+            `build-multimonitor` will rebuild and smoke-test this branch before merge.

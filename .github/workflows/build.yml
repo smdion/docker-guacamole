@@ -1,0 +1,68 @@
+name: build-multimonitor
+
+# Build the multi-monitor image, gate it behind the smoke test, and publish to
+# GHCR only on success. Runs on main and on the upstream-sync branch so a bad
+# upstream merge produces a red run and NO published tag.
+on:
+  push:
+    branches: [main, sync/upstream]
+    paths:
+      - 'Dockerfile.multimonitor'
+      - 'custom/**'
+      - 'root/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/guacamole-multimonitor
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load build inputs from PR_SHAS.env
+        run: cat custom/PR_SHAS.env >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (load locally for smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.multimonitor
+          load: true
+          tags: guacamole-multimonitor:smoke
+          build-args: |
+            GUAC_VER=${{ env.GUAC_VER }}
+            PG_VERSION=${{ env.PG_VERSION }}
+            GUAC_SERVER_REPO=${{ env.GUAC_SERVER_REPO }}
+            GUAC_SERVER_REF=${{ env.GUAC_SERVER_REF }}
+            GUAC_CLIENT_REPO=${{ env.GUAC_CLIENT_REPO }}
+            GUAC_CLIENT_REF=${{ env.GUAC_CLIENT_REF }}
+
+      - name: Smoke test (gate)
+        run: |
+          chmod +x custom/smoke-test.sh
+          ./custom/smoke-test.sh guacamole-multimonitor:smoke
+
+      - name: Log in to GHCR
+        if: success() && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push (only after smoke pass, only on main)
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          docker tag guacamole-multimonitor:smoke "${IMAGE}:${GUAC_VER}-mm"
+          docker tag guacamole-multimonitor:smoke "${IMAGE}:latest"
+          docker push "${IMAGE}:${GUAC_VER}-mm"
+          docker push "${IMAGE}:latest"
+          echo "Published ${IMAGE}:${GUAC_VER}-mm and :latest"

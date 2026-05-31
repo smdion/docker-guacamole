@@ -1,0 +1,26 @@
+# Local convenience: build + boot the multi-monitor image with a throwaway
+# /config, then run the smoke gate by hand. CI does the same via build.yml.
+#
+#   docker compose -f custom/smoke-compose.yml build
+#   docker compose -f custom/smoke-compose.yml up -d
+#   ./custom/smoke-test.sh guacamole-multimonitor:smoke
+#   docker compose -f custom/smoke-compose.yml down -v
+services:
+  guacamole:
+    build:
+      context: ..
+      dockerfile: Dockerfile.multimonitor
+      args:
+        GUAC_VER: "1.6.0"
+        PG_VERSION: "15"
+        GUAC_SERVER_REPO: "https://github.com/corentin-soriano/guacamole-server.git"
+        GUAC_SERVER_REF: "ce23d6082edf8e6715857772029a1ed7a47ad79e"
+        GUAC_CLIENT_REPO: "https://github.com/corentin-soriano/guacamole-client.git"
+        GUAC_CLIENT_REF: "18d3783850a44f3c661522f4e9148a7973e6bbb2"
+    image: guacamole-multimonitor:smoke
+    environment:
+      EXTENSIONS: "auth-sso-openid"
+    tmpfs:
+      - /config
+    ports:
+      - "8084:8080"

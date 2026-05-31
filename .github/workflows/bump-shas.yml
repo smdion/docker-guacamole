@@ -1,0 +1,53 @@
+name: bump-shas
+
+# Deliberately advance the pinned multi-monitor PR SHAs (the draft PRs are
+# force-pushed, so pins go stale). Edits custom/PR_SHAS.env and opens a PR;
+# build-multimonitor then applies the SAME build + smoke gate before merge.
+on:
+  workflow_dispatch:
+    inputs:
+      server_ref:
+        description: 'guacamole-server PR #560 head SHA'
+        required: true
+      client_ref:
+        description: 'guacamole-client PR #1061 head SHA'
+        required: true
+      server_repo:
+        description: 'server repo URL (optional override)'
+        required: false
+        default: 'https://github.com/corentin-soriano/guacamole-server.git'
+      client_repo:
+        description: 'client repo URL (optional override)'
+        required: false
+        default: 'https://github.com/corentin-soriano/guacamole-client.git'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rewrite custom/PR_SHAS.env
+        run: |
+          sed -i \
+            -e "s|^GUAC_SERVER_REPO=.*|GUAC_SERVER_REPO=${{ inputs.server_repo }}|" \
+            -e "s|^GUAC_SERVER_REF=.*|GUAC_SERVER_REF=${{ inputs.server_ref }}|" \
+            -e "s|^GUAC_CLIENT_REPO=.*|GUAC_CLIENT_REPO=${{ inputs.client_repo }}|" \
+            -e "s|^GUAC_CLIENT_REF=.*|GUAC_CLIENT_REF=${{ inputs.client_ref }}|" \
+            custom/PR_SHAS.env
+          echo "----- updated PR_SHAS.env -----"; cat custom/PR_SHAS.env
+
+      - name: Open PR with new SHAs
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/bump-shas
+          base: main
+          title: "chore: bump multi-monitor PR SHAs"
+          commit-message: "chore: bump multi-monitor PR SHAs"
+          body: |
+            Advances the pinned GUACAMOLE-288 PR SHAs.
+            `build-multimonitor` will rebuild + smoke-test before this can merge.

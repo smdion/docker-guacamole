@@ -1,0 +1,148 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-monitor Guacamole — additive over abesnier/docker-guacamole.
+#
+# Tracks Dockerfile.github.base.noble as closely as possible (which ALREADY uses
+# FreeRDP 3 and ALREADY builds guacamole-server from git with
+# --enable-allow-freerdp-snapshots). To get GUACAMOLE-288 multi-monitor RDP it
+# changes only what is strictly necessary:
+#
+#   * guacamole-server  -> built from PR #560 (corentin-soriano) instead of
+#                          apache/guacamole-server main.
+#   * guacamole-client  -> war + extension jars built from PR #1061 via maven
+#                          (stage 1) instead of the externally-prebuilt release
+#                          war/extensions the stock build COPYs from context.
+#   * PostgreSQL        -> folded in here (stock keeps it in a separate pg layer)
+#                          so this single image is a drop-in for the
+#                          embedded-Postgres deployment.
+#
+# Everything else (s6-overlay, LibVNCServer, FreeRDP link, JDBC driver, the
+# /app/guacamole -> /config runtime dance, root/ tree) mirrors the stock noble
+# build. All inputs come from custom/PR_SHAS.env (passed as build args).
+#
+# NOTE: this image is built and validated ONLY by CI (.github/workflows/build.yml
+# + custom/smoke-test.sh). It is published for SEPARATE testing and does not
+# replace the production guacamole container.
+
+# ----------------------------------------------------------------------------
+# Stage 1 — multi-monitor client: war + extension jars + Postgres schema (PR #1061)
+# ----------------------------------------------------------------------------
+FROM maven:3-eclipse-temurin-11 AS client-build
+
+ARG GUAC_VER=1.6.0
+ARG GUAC_CLIENT_REPO=https://github.com/corentin-soriano/guacamole-client.git
+ARG GUAC_CLIENT_REF=18d3783850a44f3c661522f4e9148a7973e6bbb2
+
+RUN git clone "${GUAC_CLIENT_REPO}" /src && \
+    cd /src && \
+    git checkout "${GUAC_CLIENT_REF}" && \
+    mvn -q -B -DskipTests clean package
+
+# Collect the artifacts the final stage needs:
+#   ROOT.war                      — the multi-monitor webapp
+#   extensions-available/*.jar    — auth-jdbc-postgresql, auth-sso-openid, etc.
+#   schema/                       — Postgres schema used by 40-postgres.sh on init
+RUN set -eux; \
+    mkdir -p /artifacts/extensions-available; \
+    cp /src/guacamole/target/guacamole-${GUAC_VER}.war /artifacts/ROOT.war; \
+    find /src/extensions -path '*/target/*.jar' \
+        ! -name '*-tests.jar' ! -name 'original-*.jar' \
+        -exec cp {} /artifacts/extensions-available/ \; ; \
+    cp -r /src/extensions/guacamole-auth-jdbc/modules/guacamole-auth-jdbc-postgresql/schema /artifacts/schema
+
+# ----------------------------------------------------------------------------
+# Stage 2 — final image (mirrors Dockerfile.github.base.noble + pg layer)
+# ----------------------------------------------------------------------------
+FROM library/tomcat:9.0.118-jre11-temurin-noble
+
+ENV GUACAMOLE_HOME=/app/guacamole \
+    PGDATA=/config/postgres \
+    POSTGRES_USER=guacamole \
+    POSTGRES_DB=guacamole_db \
+    S6OVERLAY_VER=3.2.3.0 \
+    POSTGREJDBC_VER=42.7.11 \
+    GUAC_VER=1.6.0
+
+ARG GUAC_VER=1.6.0
+ARG PG_VERSION=15
+ARG GUAC_SERVER_REPO=https://github.com/corentin-soriano/guacamole-server.git
+ARG GUAC_SERVER_REF=ce23d6082edf8e6715857772029a1ed7a47ad79e
+
+RUN mkdir -p ${GUACAMOLE_HOME} \
+    ${GUACAMOLE_HOME}/lib \
+    ${GUACAMOLE_HOME}/extensions \
+    ${GUACAMOLE_HOME}/extensions-available
+
+# Multi-monitor client artifacts from stage 1 (replaces the stock COPY of an
+# externally-prebuilt war + ./extensions release tarballs).
+COPY --from=client-build /artifacts/ROOT.war ${CATALINA_HOME}/webapps/ROOT.war
+COPY --from=client-build /artifacts/extensions-available/ ${GUACAMOLE_HOME}/extensions-available/
+COPY --from=client-build /artifacts/schema ${GUACAMOLE_HOME}/schema
+
+RUN set -xe && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+      apt-transport-https ca-certificates curl git gnupg2 gpg lsb-release \
+      software-properties-common xz-utils \
+# s6-overlay
+&& cd /tmp \
+&& curl -OfsSL https://github.com/just-containers/s6-overlay/releases/download/v${S6OVERLAY_VER}/s6-overlay-noarch.tar.xz \
+&& curl -OfsSL https://github.com/just-containers/s6-overlay/releases/download/v${S6OVERLAY_VER}/s6-overlay-x86_64.tar.xz \
+&& curl -OfsSL https://github.com/just-containers/s6-overlay/releases/download/v${S6OVERLAY_VER}/s6-overlay-aarch64.tar.xz \
+&& curl -OfsSL https://github.com/just-containers/s6-overlay/releases/download/v${S6OVERLAY_VER}/s6-overlay-symlinks-noarch.tar.xz \
+&& curl -OfsSL https://github.com/just-containers/s6-overlay/releases/download/v${S6OVERLAY_VER}/syslogd-overlay-noarch.tar.xz \
+&& tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+&& if [ "$(arch)" = "x86_64" ] ; then tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz; else tar -C / -Jxpf /tmp/s6-overlay-aarch64.tar.xz; fi \
+&& tar -C / -Jxpf /tmp/s6-overlay-symlinks-noarch.tar.xz \
+&& tar -C / -Jxpf /tmp/syslogd-overlay-noarch.tar.xz \
+&& cd / && rm /tmp/*.tar.xz \
+# PostgreSQL apt repo + build/runtime dependencies (FreeRDP 3 is upstream-stock)
+&& curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg \
+&& echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | tee /etc/apt/sources.list.d/pgdg.list \
+&& apt-get update && apt-get upgrade -y -t noble-backports \
+&& apt-get install -y --no-install-recommends \
+      freerdp3-dev ghostscript libavcodec-dev libavformat-dev libavutil-dev \
+      libcairo2-dev libfreerdp-client3-3 libjpeg-dev libjpeg-turbo8-dev \
+      libossp-uuid-dev libpango1.0-dev libpng-dev libpulse-dev libssh2-1-dev \
+      libssl-dev libswscale-dev libtelnet-dev libtool-bin libvncclient1 \
+      libvncserver-dev libvorbis-dev libwebp-dev libwebsockets-dev make cmake \
+      autoconf automake xmlstarlet \
+# Updated LibVNCServer
+&& mkdir /git && cd /git \
+&& git clone https://github.com/LibVNC/libvncserver.git --depth=1 -b master \
+&& cd libvncserver && mkdir build && cd build && cmake .. && cmake --build . && cmake --install . \
+&& cd / && rm -rf /git/libvncserver \
+# Link FreeRDP where guacd expects it
+&& ( ln -s /usr/local/lib/freerdp /usr/lib/x86_64-linux-gnu/freerdp \
+  || ln -s /usr/local/lib/freerdp /usr/lib/aarch64-linux-gnu/freerdp || true ) \
+# guacamole-server from PR #560 (multi-monitor)
+&& cd /git \
+&& git clone "${GUAC_SERVER_REPO}" guacamole-server \
+&& cd guacamole-server \
+&& git checkout "${GUAC_SERVER_REF}" \
+&& autoreconf -fi \
+&& ./configure --enable-allow-freerdp-snapshots CFLAGS="-Wno-error=deprecated-declarations" \
+&& make -j"$(getconf _NPROCESSORS_ONLN)" \
+&& make install \
+&& cd / && ldconfig \
+# JDBC driver + activate the maven-built postgres auth extension
+&& curl -SLo ${GUACAMOLE_HOME}/lib/postgresql-${POSTGREJDBC_VER}.jar "https://jdbc.postgresql.org/download/postgresql-${POSTGREJDBC_VER}.jar" \
+&& cp ${GUACAMOLE_HOME}/extensions-available/guacamole-auth-jdbc-postgresql-${GUAC_VER}.jar ${GUACAMOLE_HOME}/extensions/ \
+&& rm -rf ${CATALINA_HOME}/webapps/ROOT \
+# PostgreSQL server (folded-in pg layer)
+&& apt-get install -y --no-install-recommends postgresql-${PG_VERSION} \
+# cleanup
+&& apt-get --purge autoremove -y \
+&& apt-get clean -y \
+&& rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* ~/.m2 /git
+
+ENV PG_MAJOR=${PG_VERSION}
+ENV GUACAMOLE_HOME=/config/guacamole
+ENV GUACD_LOG_LEVEL=info
+ENV S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
+ENV PATH=/usr/lib/postgresql/${PG_VERSION}/bin:$PATH
+
+COPY root /
+
+WORKDIR /config
+EXPOSE 8080
+ENTRYPOINT [ "/init" ]
+HEALTHCHECK --timeout=3s CMD wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1
